@@ -1,8 +1,10 @@
 # Backend – Sistema de Recuperación de Información
 
-Este directorio contiene el **backend del Sistema de Recuperación de Información (RI)** desarrollado como parte de la práctica final de la asignatura.
+Este directorio contiene el **backend del Sistema de Recuperación de Información** desarrollado como parte de la práctica final de la asignatura.
 
 El backend está implementado en **Python** utilizando **FastAPI**, y expone una serie de endpoints que representan las distintas fases del proceso de Recuperación de Información: análisis léxico, tokenización, eliminación de stopwords, lematización/stemming, ponderación de términos, indexación y búsqueda.
+
+Una característica adicional del sistema es la detección automática del idioma a nivel de documento, lo que permite aplicar dinámicamente los recursos lingüísticos adecuados durante el preprocesado.
 
 ---
 
@@ -13,6 +15,7 @@ El backend está implementado en **Python** utilizando **FastAPI**, y expone una
 - Uvicorn
 - NLTK
 - Pydantic
+- Lingua Language Detector
 - Entorno virtual (`venv`)
 
 El desarrollo y las pruebas se han realizado sobre **Arch Linux**, aunque el backend es portable a cualquier sistema compatible con Python 3.
@@ -33,7 +36,8 @@ backend/
 │   │   ├── requests.py      # Modelos de entrada (Pydantic)
 │   │   └── responses.py     # Modelos de salida (Pydantic)
 │   ├── services/
-│   │   ├── preprocess.py    # Pipeline de preprocesado
+│   │   ├── preprocess.py    # Pipeline de preprocesado (dinámico por idioma)
+        ├── langdetect.py    # Detección automática de idioma
 │   │   ├── indexer.py       # Construcción del índice
 │   │   └── searcher.py      # Motor de búsqueda
 │   └── storage/
@@ -46,15 +50,6 @@ backend/
 ├── requirements.txt
 └── README.md
 ```
-
----
-
-## Requisitos del sistema
-
-- Python **3.10 o superior** (recomendado 3.13)
-- `python-venv`
-- `pip`
-- Bash (para ejecutar los scripts)
 
 ---
 
@@ -111,11 +106,30 @@ El backend expone los siguientes endpoints principales:
 
 ### Indexación
 - `POST /index`  
-  Construye el índice a partir de un corpus en formato JSONL.
+  Construye el índice a partir de un corpus en formato JSONL. Durante este proceso se detecta autimáticamente el idioma de cada documento y se aplican dinámicamente las stopwords y el stemming correspondientes.
 
 ### Búsqueda
 - `GET /search?query=texto`  
   Devuelve los documentos más relevantes para una consulta.
+
+---
+
+## Detección dinámica del idioma
+
+- Durante la indexación, el sistema detecta automáticamente el idioma de cada documento utilizando un detector offline (Lingua Language Detector).
+- El idioma detectado se utiliza para seleccionar dinámicamente:
+  - Stopwords
+  - Algoritmo de stemming
+
+### Idioma en consultas del usuario
+
+Las consultas del usuario suelen ser muy cortas, lo que dificulta una detección fiable del idioma. Por este motivo, el sistema aplica la siguiente estrategia:
+
+- Se intenta detectar el idioma de la consulta.
+- Si el idioma detectado es *unknown*, se utiliza un idioma por defecto definido en la configuración:
+  - *settings.DEFAULT_QUERY_LANGUAGE*
+
+Este enfoque garantiza la coherencia entre el preprocesado de las consultas y el índice, evitando pérdidas de recuperación.
 
 ---
 
@@ -141,5 +155,6 @@ Ejemplo de documento:
 - El backend debe ejecutarse siempre dentro del entorno virtual `.venv`.
 - El endpoint `/search` requiere que el índice haya sido construido previamente mediante el endpoint `/index`.
 - El sistema implementa un motor de búsqueda **baseline basado en TF-IDF**, suficiente para cumplir los objetivos de la práctica.
+- El soporte multilingüe se gestiona de forma dinámica a nivel de documento.
 
 ---
