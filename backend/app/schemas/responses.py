@@ -9,15 +9,6 @@ class NormalizedTextResponse(BaseModel):
 class TokensResponse(BaseModel):
     tokens: List[str]
 
-
-class WeightedTermsResponse(BaseModel):
-    weighted_terms: List[dict]
-
-
-class SelectedTermsResponse(BaseModel):
-    selected_terms: List[str]
-
-
 class IndexBuildResponse(BaseModel):
     ok: bool
     indexed_docs: int

@@ -1,11 +1,9 @@
 from __future__ import annotations
 from dataclasses import dataclass
-from typing import Dict, List, Tuple, Optional
+from typing import List
 from collections import Counter, defaultdict
 import heapq
-import math
 import json
-import gzip
 import sqlite3
 import shutil
 from pathlib import Path
@@ -17,7 +15,6 @@ from app.services.langdetect import detect_language
 POSTINGS_NAME = "index.postings"
 TERMS_INDEX_NAME = "index.terms.json"
 DOC_STORE_NAME = "doc_store.jsonl"
-DOC_INDEX_NAME = "doc_store.idx.json"
 DOC_STORE_PARTS_DIRNAME = "doc_store_parts"
 DOC_INDEX_SQLITE_NAME = "doc_store.sqlite"
 META_NAME = "index.meta.json"
@@ -26,274 +23,10 @@ TF_DECIMALS = 6
 
 
 @dataclass
-class IndexArtifacts:
-    inverted_index: Dict[str, List[Tuple[str, float]]]
-    doc_store: Dict[str, dict]
-    df: Dict[str, int]
-    N: int
-
-
-def build_tfidf_index(docs: List[dict]) -> IndexArtifacts:
-    N = len(docs)
-    df = Counter()
-    tfs = {}
-    doc_store = {}
-
-    for d in docs:
-        doc_id = str(d["doc_id"])
-        terms = d["terms"]  # Ya preprocesados
-        c = Counter(terms)
-        tfs[doc_id] = c
-        for term in c.keys():
-            df[term] += 1
-        doc_store[doc_id] = {
-            k: d.get(k)
-            for k in [
-                "title",
-                "url",
-                "snippet",
-            ]
-        }
-
-    min_df = getattr(settings, "MIN_DF", 1)
-    max_df_ratio = getattr(settings, "MAX_DF_RATIO", 1.0)
-    max_df = int(max_df_ratio * N) if N > 0 else 0
-
-    if max_df < min_df:
-        max_df = min_df
-
-    allowed_terms = {t for t, f in df.items() if f >= min_df and f <= max_df}
-
-    idf = {t: (math.log((N + 1) / (df[t] + 1)) + 1.0) for t in allowed_terms}
-
-    inverted = defaultdict(list)
-    for doc_id, c in tfs.items():
-        doc_len = sum(c.values()) or 1
-        for term, freq in c.items():
-            if term not in allowed_terms:
-                continue
-            tf = freq / doc_len
-            tfidf = round(tf * idf[term], 3)
-            inverted[term].append((doc_id, float(tfidf)))
-
-    # Ordenar postings por peso descendente
-    for term in inverted.keys():
-        inverted[term].sort(key=lambda x: x[1], reverse=True)
-
-    return IndexArtifacts(dict(inverted), dict(doc_store), dict(df), N)
-
-
-def save_index(art: IndexArtifacts, out_dir: Path) -> Path:
-    out_dir.mkdir(parents=True, exist_ok=True)
-    path = out_dir / "index.json.gz"
-    payload = {
-        "N": art.N,
-        "doc_store": art.doc_store,
-        "inverted_index": art.inverted_index,
-    }
-    with gzip.open(path, "wt", encoding="utf-8") as f:
-        json.dump(payload, f, ensure_ascii=False, separators=(",", ":"))
-    return path
-
-
-@dataclass
 class BlockIndexResult:
     N: int
     vocab_size: int
     index_path: Path
-
-
-class BlockIndexWriter:
-    def __init__(self, out_dir: Path, block_docs: Optional[int] = None):
-        self.out_dir = out_dir
-        self.out_dir.mkdir(parents=True, exist_ok=True)
-        self.block_docs = block_docs or settings.INDEX_BLOCK_DOCS
-        self.block_dir = self.out_dir / BLOCK_DIRNAME
-        self.block_dir.mkdir(parents=True, exist_ok=True)
-
-        self._block_id = 0
-        self._block_doc_count = 0
-        self._block_inverted = defaultdict(list)
-        self.block_paths: List[Path] = []
-
-        self.df = Counter()
-        self.N = 0
-        self.doc_offsets: Dict[str, int] = {}
-        self._doc_store_path = self.out_dir / DOC_STORE_NAME
-        self._doc_store_f = self._doc_store_path.open("wb")
-
-    def add(self, doc: dict) -> None:
-        doc_id = str(doc.get("doc_id"))
-        terms = doc.get("terms") or []
-        c = Counter(terms)
-        if c:
-            self.df.update(c.keys())
-            doc_len = sum(c.values()) or 1
-            for term, freq in c.items():
-                tf = round(freq / doc_len, TF_DECIMALS)
-                self._block_inverted[term].append((doc_id, float(tf)))
-
-        meta = {
-            "title": doc.get("title"),
-            "url": doc.get("url"),
-            "snippet": doc.get("snippet"),
-        }
-        offset = self._doc_store_f.tell()
-        self.doc_offsets[doc_id] = offset
-        line = (
-            json.dumps(meta, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-            + b"\n"
-        )
-        self._doc_store_f.write(line)
-
-        self.N += 1
-        self._block_doc_count += 1
-        if self._block_doc_count >= self.block_docs:
-            self._flush_block()
-
-    def finalize(self) -> BlockIndexResult:
-        self._flush_block()
-        self._doc_store_f.close()
-
-        doc_index_path = self.out_dir / DOC_INDEX_NAME
-        doc_index_path.write_text(
-            json.dumps(self.doc_offsets, ensure_ascii=False, separators=(",", ":")),
-            encoding="utf-8",
-        )
-
-        vocab_size = self._merge_blocks()
-        meta_path = self._write_meta(vocab_size)
-
-        if not settings.INDEX_KEEP_BLOCKS:
-            for path in self.block_paths:
-                try:
-                    path.unlink()
-                except FileNotFoundError:
-                    pass
-            try:
-                self.block_dir.rmdir()
-            except OSError:
-                pass
-
-        return BlockIndexResult(self.N, vocab_size, meta_path)
-
-    def _flush_block(self) -> None:
-        if not self._block_inverted:
-            self._block_doc_count = 0
-            return
-
-        self._block_id += 1
-        path = self.block_dir / f"block_{self._block_id:05d}.jsonl"
-        with path.open("wb") as f:
-            for term in sorted(self._block_inverted.keys()):
-                postings = self._block_inverted[term]
-                line = (
-                    f"{term}\t"
-                    + json.dumps(postings, ensure_ascii=False, separators=(",", ":"))
-                    + "\n"
-                )
-                f.write(line.encode("utf-8"))
-        self.block_paths.append(path)
-        self._block_inverted = defaultdict(list)
-        self._block_doc_count = 0
-
-    def _write_meta(self, vocab_size: int) -> Path:
-        meta_path = self.out_dir / META_NAME
-        meta = {
-            "format": "block",
-            "N": self.N,
-            "vocab_size": vocab_size,
-            "postings_path": POSTINGS_NAME,
-            "terms_index_path": TERMS_INDEX_NAME,
-            "doc_store_path": DOC_STORE_NAME,
-            "doc_index_path": DOC_INDEX_NAME,
-        }
-        meta_path.write_text(
-            json.dumps(meta, ensure_ascii=False, separators=(",", ":")),
-            encoding="utf-8",
-        )
-        return meta_path
-
-    @staticmethod
-    def _read_block_line(handle):
-        line = handle.readline()
-        if not line:
-            return None, None
-        term_bytes, postings_bytes = line.rstrip(b"\n").split(b"\t", 1)
-        term = term_bytes.decode("utf-8")
-        postings = json.loads(postings_bytes)
-        return term, postings
-
-    def _merge_blocks(self) -> int:
-        min_df = getattr(settings, "MIN_DF", 1)
-        max_df_ratio = getattr(settings, "MAX_DF_RATIO", 1.0)
-        max_df = int(max_df_ratio * self.N) if self.N > 0 else 0
-        if max_df < min_df:
-            max_df = min_df
-
-        postings_path = self.out_dir / POSTINGS_NAME
-        terms_index_path = self.out_dir / TERMS_INDEX_NAME
-        terms_index = {}
-        handles = [path.open("rb") for path in self.block_paths]
-        heap = []
-
-        try:
-            for i, handle in enumerate(handles):
-                term, postings = self._read_block_line(handle)
-                if term is not None:
-                    heapq.heappush(heap, (term, i, postings))
-
-            current_term = None
-            current_allowed = False
-            first_posting = True
-            current_offset = 0
-
-            with postings_path.open("wb") as out_f:
-                while heap:
-                    term, i, postings = heapq.heappop(heap)
-                    if term != current_term:
-                        if current_term is not None and current_allowed:
-                            out_f.write(b"]\n")
-                            length = out_f.tell() - current_offset
-                            terms_index[current_term] = [current_offset, length]
-
-                        current_term = term
-                        term_df = self.df.get(term, 0)
-                        current_allowed = min_df <= term_df <= max_df
-                        if current_allowed:
-                            current_offset = out_f.tell()
-                            out_f.write(f"{term}\t[".encode("utf-8"))
-                            first_posting = True
-
-                    if current_allowed:
-                        for doc_id, tf in postings:
-                            if not first_posting:
-                                out_f.write(b",")
-                            entry = json.dumps(
-                                [doc_id, tf],
-                                ensure_ascii=False,
-                                separators=(",", ":"),
-                            ).encode("utf-8")
-                            out_f.write(entry)
-                            first_posting = False
-
-                    next_term, next_postings = self._read_block_line(handles[i])
-                    if next_term is not None:
-                        heapq.heappush(heap, (next_term, i, next_postings))
-
-                if current_term is not None and current_allowed:
-                    out_f.write(b"]\n")
-                    length = out_f.tell() - current_offset
-                    terms_index[current_term] = [current_offset, length]
-        finally:
-            for handle in handles:
-                handle.close()
-
-        terms_index_path.write_text(
-            json.dumps(terms_index, ensure_ascii=False, separators=(",", ":")),
-            encoding="utf-8",
-        )
-        return len(terms_index)
 
 
 def _read_block_line(handle):
@@ -488,9 +221,7 @@ def _build_doc_index_sqlite(doc_store_path: Path, out_dir: Path) -> Path:
     return sqlite_path
 
 
-def _merge_blocks_spimi(
-    block_paths: List[Path], out_dir: Path, total_docs: int
-) -> int:
+def _merge_blocks_spimi(block_paths: List[Path], out_dir: Path, total_docs: int) -> int:
     df_counts = Counter()
     for path in block_paths:
         with path.open("rb") as f:

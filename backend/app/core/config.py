@@ -21,10 +21,9 @@ class Settings(BaseSettings):
     MIN_DF: int = 2
     MAX_DF_RATIO: float = 0.5
     INDEX_WORKERS: int = os.cpu_count() or 1
-    INDEX_CHUNKSIZE: int = 200
     INDEX_BLOCK_DOCS: int = 10_000
-    INDEX_MAX_IN_FLIGHT: int = 0  # 0 = auto (2 * INDEX_WORKERS)
-    INDEX_MAX_TASKS_PER_CHILD: int = 10  # 0 = disable worker recycling
+    INDEX_MAX_IN_FLIGHT: int = 0  # 0 = auto
+    INDEX_MAX_TASKS_PER_CHILD: int = 10  # 0 = desactivar reciclaje de workers
     INDEX_KEEP_BLOCKS: bool = False
 
 

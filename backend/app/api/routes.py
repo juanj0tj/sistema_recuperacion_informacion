@@ -1,16 +1,8 @@
 from fastapi import APIRouter, HTTPException
-from app.schemas.requests import (
-    TextRequest,
-    TokensRequest,
-    WeightTermsRequest,
-    SelectTermsRequest,
-    IndexRequest,
-)
+from app.schemas.requests import TextRequest, TokensRequest, IndexRequest
 from app.schemas.responses import (
     NormalizedTextResponse,
     TokensResponse,
-    WeightedTermsResponse,
-    SelectedTermsResponse,
     IndexBuildResponse,
     SearchResponse,
     SearchResult,
@@ -92,23 +84,6 @@ def lemmatize(req: TokensRequest):
     return {"tokens": tokens}
 
 
-@router.post("/weight_terms", response_model=WeightedTermsResponse)
-def weight_terms(req: WeightTermsRequest):
-    # stub: pesos dummy (en el indexado real se calcula TF-IDF)
-    weighted = [{"term": t, "weight": 1.0} for t in req.terms]
-    return {"weighted_terms": weighted}
-
-
-@router.post("/select_terms", response_model=SelectedTermsResponse)
-def select_terms(req: SelectTermsRequest):
-    # stub: selecciona top por weight
-    sorted_terms = sorted(
-        req.weighted_terms, key=lambda x: x.get("weight", 0), reverse=True
-    )
-    selected = [x["term"] for x in sorted_terms[:50] if "term" in x]
-    return {"selected_terms": selected}
-
-
 @router.post("/index", response_model=IndexBuildResponse)
 def index_documents(req: IndexRequest):
     """
@@ -180,11 +155,11 @@ def index_documents(req: IndexRequest):
                     )
                     next_log += LOG_EVERY
 
-    logger.info(
-        "Lectura + preprocesado completados. Total documentos=%d", total_docs
-    )
+    logger.info("Lectura + preprocesado completados. Total documentos=%d", total_docs)
 
-    result = finalize_spimi(block_paths, doc_store_paths, settings.INDEX_DIR, total_docs)
+    result = finalize_spimi(
+        block_paths, doc_store_paths, settings.INDEX_DIR, total_docs
+    )
     out = result.index_path
 
     elapsed_total = time.time() - start

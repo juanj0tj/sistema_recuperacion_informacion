@@ -10,10 +10,4 @@ def ensure_dirs():
 
 
 def index_file_path() -> Path:
-    meta_path = settings.INDEX_DIR / "index.meta.json"
-    if meta_path.exists():
-        return meta_path
-    gz_path = settings.INDEX_DIR / "index.json.gz"
-    if gz_path.exists():
-        return gz_path
-    return settings.INDEX_DIR / "index.json"
+    return settings.INDEX_DIR / "index.meta.json"
