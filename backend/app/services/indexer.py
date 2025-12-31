@@ -7,6 +7,7 @@ import json
 import sqlite3
 import shutil
 from pathlib import Path
+from urllib.parse import urlparse
 from app.core.config import settings
 from app.services import preprocess
 from app.services.langdetect import detect_language
@@ -27,6 +28,22 @@ class BlockIndexResult:
     N: int
     vocab_size: int
     index_path: Path
+
+
+def _make_doc_uid(doc_id: str, url: str | None, namespace: str | None = None) -> str:
+    doc_id = doc_id or ""
+    if not namespace and url:
+        try:
+            host = urlparse(url).hostname
+        except ValueError:
+            host = None
+        namespace = host or None
+    if namespace:
+        if doc_id:
+            return f"{namespace}:{doc_id}"
+        if url:
+            return f"{namespace}:{url}"
+    return doc_id or (url or "")
 
 
 def _read_block_line(handle):
@@ -88,15 +105,22 @@ def spimi_worker(args: tuple) -> dict:
             toks = preprocess.filter_meaningful(toks, min_len=settings.MIN_TOKEN_LEN)
             toks = preprocess.lemmatize_or_stem(toks, language=lang)
 
-            doc_id = str(d.get("doc_id"))
+            raw_doc_id = d.get("doc_id")
+            raw_doc_id = "" if raw_doc_id is None else str(raw_doc_id)
+            doc_uid = _make_doc_uid(
+                raw_doc_id,
+                d.get("url"),
+                d.get("source") or d.get("lang"),
+            )
             c = Counter(toks)
             doc_len = sum(c.values()) or 1
             for term, freq in c.items():
                 tf = round(freq / doc_len, TF_DECIMALS)
-                inverted[term].append((doc_id, float(tf)))
+                inverted[term].append((doc_uid, float(tf)))
 
             meta = {
-                "doc_id": doc_id,
+                "doc_id": raw_doc_id,
+                "doc_uid": doc_uid,
                 "title": d.get("title"),
                 "url": d.get("url"),
                 "snippet": (raw_text[:240] if raw_text else None),
@@ -196,10 +220,10 @@ def _build_doc_index_sqlite(doc_store_path: Path, out_dir: Path) -> Path:
                 obj = json.loads(line)
             except json.JSONDecodeError:
                 continue
-            doc_id = obj.get("doc_id")
-            if doc_id is None:
+            doc_key = obj.get("doc_uid") or obj.get("doc_id")
+            if doc_key is None:
                 continue
-            batch.append((str(doc_id), int(offset)))
+            batch.append((str(doc_key), int(offset)))
             if len(batch) >= 5000:
                 cur.executemany(
                     "INSERT OR REPLACE INTO doc_index (doc_id, offset) VALUES (?, ?)",

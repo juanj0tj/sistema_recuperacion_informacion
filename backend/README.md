@@ -59,13 +59,12 @@ backend/
 data/
 ├── raw/
 │   └── corpus.jsonl         # Corpus de entrada por defecto
-├── processed/               # Reservado para futuras etapas
 └── indexes/
     ├── index.meta.json      # Metadatos del índice (formato block)
     ├── index.postings       # Postings por término (archivo de texto binario)
     ├── index.terms.json     # Diccionario term -> [offset, length]
     ├── doc_store.jsonl      # Metadatos por documento (una línea por doc)
-    └── doc_store.sqlite     # doc_id -> offset en doc_store.jsonl
+    └── doc_store.sqlite     # doc_uid -> offset en doc_store.jsonl
 ```
 
 Durante la indexación también se generan temporalmente:
@@ -130,7 +129,7 @@ La configuración se carga desde `.env` (opcional) y variables de entorno.
 
 ### Rutas
 
-- `DATA_DIR`, `RAW_DIR`, `PROCESSED_DIR`, `INDEX_DIR`.
+- `DATA_DIR`, `RAW_DIR`, `INDEX_DIR`.
 
 ---
 
@@ -164,12 +163,12 @@ El endpoint `POST /index` construye un índice por bloques (SPIMI) desde un corp
      6. `lemmatize_or_stem` (SnowballStemmer).
    - Calcula TF por documento y genera un índice invertido del bloque.
    - Guarda:
-     - `blocks/block_XXXXXX.jsonl` con líneas `term\t[[doc_id, tf], ...]`.
+     - `blocks/block_XXXXXX.jsonl` con líneas `term\t[[doc_uid, tf], ...]`.
      - `doc_store_parts/doc_store_XXXXXX.jsonl` con metadatos de documentos.
 
 5) **Finalización (merge)**
    - `doc_store_parts` se concatena en `doc_store.jsonl`.
-   - Se crea `doc_store.sqlite` con `doc_id -> offset`.
+   - Se crea `doc_store.sqlite` con `doc_uid -> offset`.
    - Se calcula DF por término y se filtra con `MIN_DF` y `MAX_DF_RATIO`.
    - Se fusionan los bloques con un heap en `index.postings`.
    - Se escribe `index.terms.json` con los offsets para cada término.
@@ -191,16 +190,16 @@ El endpoint `POST /index` construye un índice por bloques (SPIMI) desde un corp
 
 - `index.postings`:
   - Archivo de texto binario.
-  - Cada línea: `term\t[[doc_id, tf], ...]`
+  - Cada línea: `term\t[[doc_uid, tf], ...]`
 
 - `index.terms.json`:
   - Diccionario `term -> [offset, length]` para acceder rápidamente al postings.
 
 - `doc_store.jsonl`:
-  - Una línea por doc con `doc_id`, `title`, `url`, `snippet`.
+  - Una línea por doc con `doc_id`, `doc_uid`, `title`, `url`, `snippet`.
 
 - `doc_store.sqlite`:
-  - Tabla `doc_index(doc_id TEXT PRIMARY KEY, offset INTEGER)`.
+  - Tabla `doc_index(doc_id TEXT PRIMARY KEY, offset INTEGER)` (almacena `doc_uid` como clave).
 
 ---
 
@@ -252,13 +251,19 @@ curl -s -X POST "http://localhost:8000/index" \
 
 - `GET /search?query=texto`
   - Aplica preprocesado similar al de indexación.
-  - Si la detección de idioma es `unknown`, usa `DEFAULT_QUERY_LANGUAGE`.
+  - Si la detección de idioma es `unknown`, usa `DEFAULT_QUERY_LANGUAGE` o `default_language` si se pasa como query param.
   - Calcula TF‑IDF en tiempo de consulta y devuelve `TOP_K` resultados.
 
 Ejemplo:
 
 ```bash
 curl -s "http://localhost:8000/search?query=andorra"
+```
+
+Con idioma por defecto forzado:
+
+```bash
+curl -s "http://localhost:8000/search?query=andorra&default_language=spanish"
 ```
 
 ---

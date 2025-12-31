@@ -10,13 +10,12 @@ class Settings(BaseSettings):
     PROJECT_ROOT: Path = Path(__file__).resolve().parents[3]
     DATA_DIR: Path = PROJECT_ROOT / "data"
     RAW_DIR: Path = DATA_DIR / "raw"
-    PROCESSED_DIR: Path = DATA_DIR / "processed"
     INDEX_DIR: Path = DATA_DIR / "indexes"
 
     # Parámetros RI
     DEFAULT_LANGUAGE: str = "spanish"
     DEFAULT_QUERY_LANGUAGE: str = "spanish"
-    TOP_K: int = 10
+    TOP_K: int = 20
     MIN_TOKEN_LEN: int = 2
     MIN_DF: int = 2
     MAX_DF_RATIO: float = 0.5

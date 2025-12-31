@@ -1,4 +1,5 @@
 from fastapi import APIRouter, HTTPException
+from typing import Optional
 from app.schemas.requests import TextRequest, TokensRequest, IndexRequest
 from app.schemas.responses import (
     NormalizedTextResponse,
@@ -11,7 +12,7 @@ from app.core.config import settings
 from app.services import preprocess
 from app.services.indexer import spimi_worker, finalize_spimi
 from app.services.searcher import SearchEngine
-from app.services.langdetect import detect_language
+from app.services.langdetect import detect_language, SUPPORTED
 from app.storage.paths import ensure_dirs, index_file_path
 from concurrent.futures import ProcessPoolExecutor, wait, FIRST_COMPLETED
 from pathlib import Path
@@ -180,7 +181,7 @@ def index_documents(req: IndexRequest):
 
 
 @router.get("/search", response_model=SearchResponse)
-def search(query: str):
+def search(query: str, default_language: Optional[str] = None):
     idx_path = index_file_path()
     if not idx_path.exists():
         raise HTTPException(
@@ -190,9 +191,14 @@ def search(query: str):
     q = preprocess.lexical_analysis(query)
     qlang, qconf = detect_language(q)
 
+    if default_language:
+        default_language = default_language.strip().lower()
+        if default_language not in SUPPORTED:
+            raise HTTPException(status_code=422, detail="Idioma no soportado.")
+
     if qlang == "unknown":
         # fallback
-        qlang = settings.DEFAULT_QUERY_LANGUAGE
+        qlang = default_language or settings.DEFAULT_QUERY_LANGUAGE
 
     toks = preprocess.tokenize(q)
     toks = preprocess.remove_stopwords(toks, language=qlang)
@@ -203,11 +209,14 @@ def search(query: str):
     ranked = engine.search(toks, top_k=settings.TOP_K)
 
     results = []
-    for doc_id, score in ranked:
-        meta = engine.get_doc_meta(doc_id)
+    for doc_uid, score in ranked:
+        meta = engine.get_doc_meta(doc_uid)
+        doc_id = meta.get("doc_id")
+        if not doc_id:
+            doc_id = doc_uid
         results.append(
             SearchResult(
-                doc_id=doc_id,
+                doc_id=str(doc_id),
                 score=float(score),
                 title=meta.get("title"),
                 snippet=meta.get("snippet"),

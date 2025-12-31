@@ -1,2 +1,3 @@
 anotaciones/
-data/
+data/indexes/*
+data/raw/*

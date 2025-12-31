@@ -74,9 +74,7 @@ class SearchEngine:
             return {}
         try:
             meta = json.loads(line)
-            if isinstance(meta, dict):
-                meta.pop("doc_id", None)
-            return meta
+            return meta if isinstance(meta, dict) else {}
         except json.JSONDecodeError:
             return {}
 
