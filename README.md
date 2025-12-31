@@ -2,7 +2,9 @@
 
 Proyecto completo de un sistema de recuperacion de informacion con indexacion SPIMI y busqueda TF-IDF. El backend ofrece los endpoints de indexacion y consulta; el frontend permite lanzar queries, seleccionar idioma por defecto y explorar resultados con paginacion.
 
-Este README integra y resume la informacion clave de `backend/README.md` y `frontend/README.md`, y funciona como memoria de la practica.
+Este README integra y resume la informacion clave de `backend/README.md` y `frontend/README.md`, y funciona como memoria de la práctica.
+
+Repositorio asociado al proyecto: `https://github.com/juanj0tj/sistema_recuperacion_informacion`
 
 ---
 
@@ -67,6 +69,9 @@ Resumen de carpetas:
 ---
 
 ## Datos e índices
+
+El corpus de prueba y su correspondiente índice ya generado pueden descargarse en:
+- `https://drive.google.com/drive/folders/1bktuAZivMytxiFQ9Q8XsS7CRl-T40cvN?usp=sharing`
 
 Estructura esperada en `data/`:
 
